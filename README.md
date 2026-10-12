@@ -1,88 +1,19 @@
 # Mini Task Manager
 
-A simple full-stack task management application built with React, TypeScript, Express.js, and SQLite.
+A full-stack task management application built with React, TypeScript, Express.js, and SQLite.
 
-The application allows users to create, view, update, and delete tasks. Each task follows a predefined status workflow, and every successful status transition is recorded in an immutable audit log.
+Users can create tasks, move them through a predefined status workflow, delete tasks, and view an audit history of status changes.
 
-## Tech Stack
+## 1. How to Run
 
-**Frontend**
-- React with TypeScript
-- Vite
-- Tailwind CSS v4
+### Requirements
 
-**Backend**
-- Node.js
-- Express.js with TypeScript
-- SQLite using `better-sqlite3`
-
-## Features
-
-- Create tasks with an initial `to_do` status.
-- View all active tasks.
-- Move tasks forward through a predefined workflow.
-- Select an actor from a predefined list before changing a task's status.
-- View the status change history of each task.
-- Delete tasks using soft deletion.
-- Preserve audit logs after tasks are deleted.
-- Prevent audit logs from being updated or deleted through database triggers.
-
-## Task Status Workflow
-
-Tasks follow this sequence:
-
-`to_do → pending → in_progress → done`
-
-Only one-step forward transitions are allowed.
-
-For example:
-- `to_do → pending`: Allowed
-- `pending → in_progress`: Allowed
-- `pending → done`: Rejected
-- `done → to_do`: Rejected
-
-Updating a task to its current status does not create a new audit log.
-
-## Project Structure
-
-```text
-mini-task-manager/
-├── backend/
-│   └── src/
-│       ├── constants/
-│       │   └── users.ts
-│       ├── db/
-│       │   └── database.ts
-│       ├── routes/
-│       │   └── task.routes.ts
-│       ├── services/
-│       │   └── task.service.ts
-│       └── index.ts
-├── frontend/
-│   └── src/
-│       ├── api/
-│       ├── components/
-│       ├── hooks/
-│       ├── types/
-│       └── App.tsx
-└── README.md
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18 or later
+- Node.js compatible with the installed Vite version
 - npm
 
-### 1. Clone the Repository
+### Backend
 
-```bash
-git clone <YOUR_REPOSITORY_URL>
-cd mini-task-manager
-```
-
-### 2. Run the Backend
+Open a terminal in the project directory:
 
 ```bash
 cd backend
@@ -90,19 +21,15 @@ npm install
 npm run dev
 ```
 
-The backend runs at:
+The backend runs at `http://localhost:3000`.
 
-`http://localhost:3000`
+The SQLite database and its tables are created automatically when the backend starts.
 
-SQLite database tables and audit log protection triggers are initialized automatically when the backend starts.
+By default, the database file is `tasks.db`. A different database path can be configured using the `DB_PATH` environment variable.
 
-By default, the database is stored in `tasks.db` relative to the backend process's working directory.
+### Frontend
 
-You can optionally configure a different database path using the `DB_PATH` environment variable.
-
-### 3. Run the Frontend
-
-Open another terminal:
+Open a second terminal:
 
 ```bash
 cd frontend
@@ -110,36 +37,148 @@ npm install
 npm run dev
 ```
 
-The frontend runs at:
+Open `http://localhost:5173` in your browser.
 
-`http://localhost:5173`
+Both servers must be running to use the application.
 
-Keep both servers running while using the application.
+## 2. Architecture
 
-## API Endpoints
+The application uses a simple client-server architecture.
+
+**Frontend — React, TypeScript, Vite, Tailwind CSS**
+
+- `components/` contains reusable UI components such as the task form, task list, actor selection, and audit history.
+- `hooks/useTasks.ts` manages task state, API requests, and UI interactions.
+- `api/task.ts` contains the functions used to communicate with the backend.
+- `types/task.ts` defines shared frontend task and audit log types.
+
+**Backend — Express.js, TypeScript, SQLite**
+
+- `routes/task.routes.ts` handles HTTP requests and input validation.
+- `services/task.service.ts` contains business logic, including task creation, status transitions, audit logging, and soft deletion.
+- `db/database.ts` initializes SQLite tables and audit log protection triggers.
+- `constants/users.ts` contains the predefined actor list.
+
+The frontend communicates with the backend through REST API endpoints. The backend validates status changes and stores task data and audit history in SQLite.
+
+### Task Workflow
+
+`to_do → pending → in_progress → done`
+
+Tasks can only move forward by one status at a time. Repeating the current status does not create another audit log.
+
+## 3. Assumptions
+
+- This is a small application intended for local use and demonstration.
+- Authentication is outside the assignment scope, so users select an actor from a predefined list.
+- Every new task starts with the `to_do` status.
+- Task statuses can only move forward, not backward.
+- Only actual status changes should create audit logs.
+- Deleting a task means removing it from the active task list, while preserving its audit history.
+- The backend is responsible for enforcing business rules, even if the frontend already restricts user actions.
+
+## 4. Trade-offs
+
+**SQLite instead of PostgreSQL**
+
+I chose SQLite because it is lightweight, persistent, and easy to run without additional infrastructure. The trade-off is limited write concurrency compared with a database designed for larger multi-user workloads.
+
+**Soft delete instead of permanent deletion**
+
+Soft deletion preserves task references and audit history. The trade-off is that deleted tasks remain in the database and require filtering.
+
+**Predefined actors instead of authentication**
+
+A fixed actor list keeps the implementation focused on task management and audit logging. However, users can select another actor's identity, so the audit trail does not provide verified user attribution.
+
+**Simple state management**
+
+I used a custom React hook instead of introducing a global state management library. This is easier to maintain for the current application size, but more complex synchronization may require a different approach.
+
+## 5. How Do You Ensure Audit Logs Cannot Be Modified?
+
+I use an append-only audit log design.
+
+Each successful task status transition creates a new audit log record. The application does not provide endpoints to edit or delete existing audit logs.
+
+At the database level, SQLite triggers reject `UPDATE` and `DELETE` operations on the `audit_logs` table.
+
+Additionally, the task status update and audit log insertion run inside a single SQLite transaction. If either operation fails, the transaction is rolled back.
+
+This prevents a status change from being committed without its corresponding audit log.
+
+These protections prevent modification through normal application operations and SQL statements while the triggers remain active. They do not provide tamper-proof protection against someone with full access to the database file or schema.
+
+## 6. What Is the Riskiest Part If Many Users Use This Application?
+
+The biggest risk is **concurrent updates combined with unverified actor identities**.
+
+The backend uses SQLite transactions to ensure status updates and audit log inserts are atomic. SQLite also serializes writes, which helps prevent conflicting database operations.
+
+However, the frontend does not synchronize changes in real time between users.
+
+For example, two users might view the same task status. After one user updates it, the other user's screen may still display outdated information.
+
+The backend validates each request against the current database state, but the application does not yet use version numbers to detect stale client updates explicitly.
+
+Another important risk is that actors are selected manually rather than authenticated. In a real multi-user system, this would make audit attribution unreliable.
+
+To address these risks, I would add authentication, authorization, task version checking, and better client synchronization.
+
+## 7. What Would You Refactor First If This Became a Larger System, and Why?
+
+I would first refactor the backend data access and concurrency handling.
+
+Currently, business logic and SQL queries are implemented together in `task.service.ts`. This is manageable for a small project, but it would become harder to maintain as the number of features and database operations increases.
+
+I would introduce a dedicated repository or data access layer to separate SQL operations from business rules.
+
+I would also add optimistic concurrency control using a task version field, so the backend can detect updates based on outdated task data.
+
+This would make the system easier to test, maintain, and extend while reducing the risk of inconsistent behavior as more users interact with tasks.
+
+## 8. What Would You Improve With More Time?
+
+My priorities would be:
+
+1. **Automated tests:** Add unit and integration tests for status transitions, audit logging, transaction rollback, and concurrent updates.
+2. **Authentication and authorization:** Replace the predefined actor selection with verified user identities.
+3. **Optimistic concurrency control:** Introduce task version numbers to detect stale updates.
+4. **Better frontend error handling:** Add clearer retry mechanisms and stale-data indicators.
+5. **Production readiness:** Add structured logging, configuration management, and deployment support.
+
+## 9. AI Usage and Validation
+
+I used AI assistance during development for:
+
+- Discussing the application structure and implementation approach.
+- Reviewing React and TypeScript code.
+- Identifying edge cases in task status transitions.
+- Reviewing SQLite transactions, audit log immutability, and concurrency behavior.
+- Preparing test scenarios and improving documentation.
+
+I did not treat AI-generated suggestions as automatically correct.
+
+I reviewed the code and checked the implemented behavior using browser testing, Postman requests, TypeScript checks, and frontend build verification.
+
+I also tested concurrent status updates by sending two parallel requests to the same task and checking that only one audit log entry was created.
+
+For transaction rollback, I used a separate SQLite simulation that intentionally failed an audit log insertion and checked that the task status update was rolled back.
+
+These checks helped validate the implementation, although they do not replace a comprehensive automated test suite.
+
+## 10. API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/tasks` | Retrieve active tasks |
+| GET | `/tasks` | List active tasks |
 | POST | `/tasks` | Create a task |
 | PUT | `/tasks/:id/status` | Update task status |
 | DELETE | `/tasks/:id` | Soft-delete a task |
-| GET | `/tasks/:id/audit-logs` | Retrieve task audit history |
-| GET | `/users` | Retrieve predefined actors |
+| GET | `/tasks/:id/audit-logs` | View task audit history |
+| GET | `/users` | List predefined actors |
 
-### Example: Create a Task
-
-**POST** `/tasks`
-
-```json
-{
-  "title": "Review project requirements"
-}
-```
-
-New tasks start with the `to_do` status.
-
-### Example: Update Task Status
+### Example Status Update
 
 **PUT** `/tasks/:id/status`
 
@@ -150,111 +189,4 @@ New tasks start with the `to_do` status.
 }
 ```
 
-The backend validates the actor and the requested status transition.
-
-## Audit Log Design
-
-Every successful status transition creates an audit log containing:
-
-- Task ID
-- Task title
-- Actor
-- Previous status
-- New status
-- Timestamp
-
-Audit logs are append-only.
-
-SQLite triggers prevent existing audit log records from being updated or deleted through ordinary SQL operations.
-
-Task deletion uses soft deletion, allowing audit history to remain associated with the original task.
-
-Audit logs are retrieved in chronological order.
-
-## Data Consistency and Transactions
-
-Task status updates and audit log insertion are performed within a single SQLite transaction.
-
-This ensures atomicity: both operations must succeed, or neither change is committed.
-
-If inserting an audit log fails, the task status update is rolled back.
-
-The backend also checks the current task status inside the transaction before allowing a transition.
-
-## Multi-User and Concurrency Considerations
-
-The application uses SQLite transactions to maintain consistency when multiple requests attempt to update the same task.
-
-SQLite serializes writes, and the backend validates transitions using the current database state within the transaction.
-
-A concurrency test was performed by sending two parallel requests to update the same task from `to_do` to `pending`. The result produced only one audit log entry.
-
-However, the application does not currently implement user authentication or optimistic version checking. Actors are selected from a predefined list rather than being verified through authenticated sessions.
-
-For a larger multi-user application, I would introduce authentication, authorization, and explicit version-based concurrency control to better handle stale client updates.
-
-## Design Decisions and Assumptions
-
-**1. SQLite for persistence**
-
-SQLite was chosen because it is lightweight, requires no separate database server, and is sufficient for a small take-home assignment.
-
-**2. Soft deletion**
-
-Tasks are soft-deleted instead of permanently removed to preserve their relationship with audit history.
-
-**3. Predefined actors**
-
-The application uses a fixed list of actors to keep the scope focused on task management and audit tracking rather than authentication.
-
-**4. Backend-controlled transitions**
-
-The frontend only presents the next available status, but the backend independently validates all status changes. This prevents clients from bypassing workflow rules.
-
-**5. Separation of responsibilities**
-
-The frontend separates API calls, reusable components, task types, and state management. The backend separates HTTP routes, business logic, and database initialization.
-
-## Testing and Validation
-
-The application was tested manually using the browser and Postman.
-
-The following scenarios were checked:
-
-- Creating and retrieving tasks
-- Valid status transitions
-- Invalid and skipped status transitions
-- Repeated updates to the same status
-- Invalid actor selection
-- Audit log creation and chronological retrieval
-- Audit log immutability triggers
-- Soft deletion and audit history preservation
-- Concurrent status update requests
-- Frontend and backend TypeScript/build verification
-
-A separate SQLite transaction rollback simulation was also used to verify that a failed audit log insertion rolls back the preceding task update. This simulation tested the transaction mechanism rather than invoking the production service directly.
-
-## Trade-offs and Limitations
-
-- SQLite is suitable for this project's scope but may not be ideal for a high-write, distributed application.
-- Actor selection is not a replacement for authentication.
-- The frontend does not provide real-time synchronization between different users or browser sessions.
-- The application does not include a comprehensive automated unit and integration test suite.
-- Audit immutability is enforced through database triggers, but a database administrator with full schema access could still remove those protections.
-- The application is designed for local development and demonstration rather than production deployment.
-
-## What I Would Improve First
-
-My first improvement would be to add automated integration tests covering task transitions, audit log consistency, soft deletion, and concurrent updates.
-
-This would make future refactoring safer and reduce reliance on manual testing.
-
-After that, I would introduce authenticated users and optimistic concurrency control using a task version field.
-
-## AI Usage and Validation
-
-I used AI assistance during development to discuss implementation approaches, review code, identify edge cases, and improve testing and documentation.
-
-I reviewed the suggested code, adapted it to the project's structure, and validated the implemented behavior through manual API testing, browser testing, concurrency testing, and build checks.
-
-I treated AI suggestions as development assistance rather than assuming generated code was correct without verification.
+A successful transition updates the task status and creates an audit log in the same transaction.
